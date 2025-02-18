@@ -1,0 +1,25 @@
+name: checkoutpy
+ on:
+  push:
+   branches: 
+     -main
+jobs:
+ lint:
+  name: LintinCode
+   runs-on: ubuntu-latest
+   
+   steps:
+    - name: Check reposit
+    uses: actions/checkout@v4
+
+    - name: Set on Python
+    uses: actions/setup-python@v5
+     python-version: '3.x'
+
+    -name: Install depending 
+    run: |
+     python -m pip install --upgrade pip
+       pip install flake8
+
+    -name: Run flake8
+    run: flake8  .
