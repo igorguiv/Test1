@@ -1,0 +1,95 @@
+import pygame
+import random
+import math
+
+pygame.init()
+
+WIDTH, HEIGHT = 900, 600
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Drone Intercept Simulation")
+clock = pygame.time.Clock()
+
+# Ціль
+target_x = random.randint(100, 800)
+target_y = random.randint(100, 500)
+target_dx = random.choice([-3, 3])
+target_dy = random.choice([-2, 2])
+
+# Перехоплювач
+drone_x = WIDTH // 2
+drone_y = HEIGHT - 50
+drone_speed = 0
+
+# коефіцієнт наведення
+Kp = 0.04
+max_speed = 8
+
+font = pygame.font.SysFont(None, 24)
+
+running = True
+intercepted = False
+
+while running:
+    screen.fill((20, 20, 30))
+
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+
+    if not intercepted:
+        # Рух цілі
+        target_x += target_dx
+        target_y += target_dy
+
+        if target_x < 0 or target_x > WIDTH:
+            target_dx *= -1
+        if target_y < 0 or target_y > HEIGHT // 2:
+            target_dy *= -1
+
+        # Помилка
+        error_x = target_x - drone_x
+        error_y = target_y - drone_y
+
+        # Донаведення (P-контроль)
+        vx = error_x * Kp
+        vy = error_y * Kp
+
+        # Обмеження швидкості
+        speed = math.sqrt(vx**2 + vy**2)
+        if speed > max_speed:
+            vx = vx / speed * max_speed
+            vy = vy / speed * max_speed
+
+        drone_x += vx
+        drone_y += vy
+
+        # Відстань до цілі
+        distance = math.sqrt(error_x**2 + error_y**2)
+
+        # Перехоплення
+        if distance < 15:
+            intercepted = True
+
+    # Малюємо ціль
+    pygame.draw.circle(screen, (255, 80, 80), (int(target_x), int(target_y)), 10)
+
+    # Малюємо дрон
+    pygame.draw.circle(screen, (80, 200, 255), (int(drone_x), int(drone_y)), 12)
+
+    # Лінія наведення
+    pygame.draw.line(screen, (100, 100, 100),
+                     (int(drone_x), int(drone_y)),
+                     (int(target_x), int(target_y)), 1)
+
+    # Інфо
+    error_text = font.render(f"Error X: {int(target_x - drone_x)}  Y: {int(target_y - drone_y)}", True, (200, 200, 200))
+    screen.blit(error_text, (10, 10))
+
+    if intercepted:
+        boom_text = font.render("INTERCEPTED", True, (255, 200, 50))
+        screen.blit(boom_text, (WIDTH//2 - 60, HEIGHT//2))
+
+    pygame.display.flip()
+    clock.tick(60)
+
+pygame.quit()
