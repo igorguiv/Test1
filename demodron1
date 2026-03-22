@@ -1,0 +1,65 @@
+import pygame
+import random
+
+pygame.init()
+
+# Розмір вікна
+WIDTH, HEIGHT = 800, 600
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+clock = pygame.time.Clock()
+
+# Ціль
+target_x = random.randint(100, 700)
+target_y = random.randint(100, 500)
+
+# Швидкість цілі
+target_dx = 3
+target_dy = 2
+
+# "Дрон" (приціл)
+drone_x = WIDTH // 2
+drone_y = HEIGHT // 2
+
+# коефіцієнт наведення (як PID P)
+Kp = 0.05
+
+running = True
+while running:
+    screen.fill((30, 30, 30))
+
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+
+    # Рух цілі
+    target_x += target_dx
+    target_y += target_dy
+
+    if target_x < 0 or target_x > WIDTH:
+        target_dx *= -1
+    if target_y < 0 or target_y > HEIGHT:
+        target_dy *= -1
+
+    # Помилка (як у дроні)
+    error_x = target_x - drone_x
+    error_y = target_y - drone_y
+
+    # Донаведення
+    drone_x += error_x * Kp
+    drone_y += error_y * Kp
+
+    # Малюємо ціль
+    pygame.draw.circle(screen, (255, 50, 50), (int(target_x), int(target_y)), 10)
+
+    # Малюємо "дрон" (приціл)
+    pygame.draw.circle(screen, (50, 200, 255), (int(drone_x), int(drone_y)), 15, 2)
+
+    # Лінія до цілі (для наочності)
+    pygame.draw.line(screen, (100, 100, 100),
+                     (int(drone_x), int(drone_y)),
+                     (int(target_x), int(target_y)), 1)
+
+    pygame.display.flip()
+    clock.tick(60)
+
+pygame.quit()
