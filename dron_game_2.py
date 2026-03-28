@@ -10,7 +10,9 @@ class Drone:
 
     def update_manual(self):
         # update logic to control camera instead of crosshair using CAMERA_SPEED_MULTIPLIER...  
-
+    self.camera_offset_x += 0  # your implementation here
+    self.camera_offset_y += 0  # your implementation here
+    
     def center(self):
         return (WIDTH // 2, HEIGHT // 2)
 
