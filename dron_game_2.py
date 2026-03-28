@@ -1,3 +1,7 @@
+# Щоб запустити цей файл через термінал, використайте команду:
+#    python3 Назва_файлу.py
+# Перевірте, що встановлено pygame: pip install pygame
+
 import pygame
 import sys
 import random
@@ -281,3 +285,4 @@ def main():
     sys.exit()
 
 if __name__ == "__main__":
+    main()
