@@ -1,3 +1,6 @@
+import os
+os.environ['PYGAME_DETECT_AVX2'] = '1'
+
 import pygame
 import sys
 import random
