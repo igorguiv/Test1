@@ -23,11 +23,15 @@ TARGET_SPEED_PX_PER_S = TARGET_SPEED_KMH * 1000 / 3600 * (1/3)  # масштаб
 DRONE_MIN_SPEED_KMH = 100
 DRONE_MAX_SPEED_KMH = 300
 DRONE_SPEED_STEP = 10
+DRONE_SPEED_PX_PER_S = DRONE_MIN_SPEED_KMH * 1000 / 3600 * (1/3)  # аналогічне масштабування
+
+AUTO_ACQUIRE_MARGIN = 20  # запас по центрування (в пікселях)
 
 FONT_SIZE = 30
 
 # Функція малює силует "шахеда"
 def draw_shahed(surface, center, size):
+    # size — це загальна висота, пропорції відносно
     x, y = center
     w = size * 1.5
     h = size
@@ -48,142 +52,131 @@ def draw_shahed(surface, center, size):
 
 # Клас цілі (шахед)
 class Target:
-    def __init__(self):
-        # Ініціалізуємо цільовий об'єкт біля центру екрану
-        self.x = WIDTH // 2 + random.randint(-80, 80)
-        self.y = HEIGHT // 2 + random.randint(-80, 80)
+    def __init__(self, cx, cy):
+        self.x = cx + random.randint(-100,100)
+        self.y = cy + random.randint(-100,100)
         self.dir_angle = random.uniform(0, 2*math.pi)
+        self.turn_vel = 0
         self.size = TARGET_INITIAL_SIZE
         self.base_size = TARGET_INITIAL_SIZE
-        self.drift_timer = 0
-        self.dir_vel = 0
-        self.chng_time = 0
-        self.base_target_speed = TARGET_SPEED_PX_PER_S
-        # Для ефекту "тікає від центру"
-        self.fake_dist = 220  # фейкова дистанція
+        self.dist_px = 230 # для обрахунку масштабу
+        self.speed_px = TARGET_SPEED_PX_PER_S
+        self.last_change = 0
 
-    def update(self, dt, drone_speed_px, drone_dir):  # drone_dir – tuple(dx,dy)
-        # --- Здвиг напрямку у випадковий бік, але з загальною тенденцією тікати від центру ---
-        cx, cy = WIDTH // 2, HEIGHT // 2
-        vec_x = self.x - cx
-        vec_y = self.y - cy
+    def update(self, dt, cross_x, cross_y):
+        # Ціль намагається тікати від прицілу, плавно змінюючи напрям
+        vec_x = self.x - cross_x
+        vec_y = self.y - cross_y
         if vec_x == 0 and vec_y == 0:
-            vec_x = 0.1
-        away_angle = math.atan2(vec_y, vec_x)
-        # Трохи "хаотично" — із зміною напряму
-        if self.chng_time <= 0:
-            # Раз на ~0.7-1.5 секунди трохи міняємо напрямок у випадковий бік
-            delta = random.uniform(-0.5, 0.5)
-            self.dir_angle += delta
-            self.chng_time = random.uniform(0.7, 1.5)
-        else:
-            self.chng_time -= dt
-        
-        # Зміщуємо основний напрямок із поточним "вектором втечі"
-        diff = (away_angle - self.dir_angle + math.pi) % (2*math.pi) - math.pi
-        self.dir_angle += diff * 0.07
-
-        # Перелічуємо швидкість
-        speed = self.base_target_speed
-        # Трохи шуму в бік (для "хаотичності")
-        drift_x = math.sin(pygame.time.get_ticks()/1017.0) * 40
-        drift_y = math.sin(pygame.time.get_ticks()/853.0) * 40
-
-        self.x += (speed * math.cos(self.dir_angle) + drift_x) * dt
-        self.y += (speed * math.sin(self.dir_angle) + drift_y) * dt
-
-        # Відсутня взаємодія із прицілом напряму; тікає від центру!
+            vec_x = 1
+        desired_angle = math.atan2(vec_y, vec_x)
+        # Плавна зміна напряму до "away"
+        diff = (desired_angle - self.dir_angle + math.pi) % (2*math.pi) - math.pi
+        self.dir_angle += diff * 0.03
+        # Додаємо невеликий випадковий "дрифт"
+        if random.random() < 0.05:
+            self.dir_angle += random.uniform(-0.2,0.2)
+        # Рух цілі
+        self.x += self.speed_px * math.cos(self.dir_angle) * dt
+        self.y += self.speed_px * math.sin(self.dir_angle) * dt
 
         # Відбивання від меж екрану
-        margin = self.size // 2 + 10
-        if not (margin < self.x < WIDTH-margin):
-            self.dir_angle = math.pi - self.dir_angle
-            self.x = min(max(self.x, margin), WIDTH-margin)
-        if not (margin < self.y < HEIGHT-margin):
-            self.dir_angle = -self.dir_angle
-            self.y = min(max(self.y, margin), HEIGHT-margin)
+        if not (0 < self.x < WIDTH): self.dir_angle += math.pi
+        if not (0 < self.y < HEIGHT): self.dir_angle += math.pi
 
-        # Обчислюємо "відстань" до центру (по суті — для масштабу)
-        self.fake_dist = math.hypot(self.x - cx, self.y - cy)
-        if self.fake_dist < 70: self.fake_dist = 70  # мінімальна дистанція
-
-        # Зміна розміру у залежності від дистанції (наближення до центру!)
-        self.size = int(self.base_size * 200 / max(70, self.fake_dist))
+        # Оновлення дистанції для масштабу
+        self.dist_px = math.hypot(self.x - cross_x, self.y - cross_y)
+        # Масштабуємо розмір - що ближче ціль, то більша
+        self.size = int(self.base_size * 200 / max(80, self.dist_px))
 
     def draw(self, surface):
         draw_shahed(surface, (int(self.x), int(self.y)), self.size)
 
-    def is_inside_square(self):
-        # Перевіряє, чи ціль повністю у квадраті прицілу (що завжди по центру)
-        # Перевіряємо чи центр цілі у квадраті + чи її контур вкладається
-        cx, cy = WIDTH // 2, HEIGHT // 2
-        hs = SQUARE_SIZE // 2
-        return (
-            (cx - hs <= self.x <= cx + hs) and
-            (cy - hs <= self.y <= cy + hs) and
-            (self.x - self.size*0.8 >= cx - hs) and (self.x + self.size*0.8 <= cx + hs) and
-            (self.y - self.size*0.8 >= cy - hs) and (self.y + self.size*0.8 <= cy + hs)
-        )
+    def is_inside_square(self, cross_x, cross_y, square_size):
+        # Перевіряє, чи центр цілі у квадраті прицілу
+        hs = square_size // 2
+        return (cross_x - hs <= self.x <= cross_x + hs) and (cross_y - hs <= self.y <= cross_y + hs)
 
-    def covers_half_square(self):
+    def covers_half_square(self, square_size):
         # Чи займає ціль принаймні половину квадрата прицілу
-        return self.size >= SQUARE_SIZE // 2
+        return self.size >= square_size // 2
 
     def covers_whole_screen(self):
         # Чи займає ціль увесь екран
         return self.size >= max(WIDTH, HEIGHT) * 1.2
 
-# Клас дрона — лише швидкість та напрямок, положення завжди в центрі!
+# Клас дрона/прицілу
 class Drone:
-    def __init__(self):
+    def __init__(self, cx, cy):
+        self.x = cx
+        self.y = cy
         self.speed_kmh = DRONE_MIN_SPEED_KMH
-        self.dir = [0, 0]  # напрямок (dx, dy), нормований
-        self.auto_mode = False
+        self.manual = True  # Якщо True — ручне керування, якщо False — автосупровід
+        self.speed_px = DRONE_SPEED_PX_PER_S
 
     def speed_px_value(self):
+        # Повертає швидкість у пікселях/сек
         return self.speed_kmh * 1000 / 3600 * (1/3)
 
-    def manual_update(self, keys_pressed):
+    def update_manual(self, keys_pressed, dt):
+        # Ручне керування прицілом
         dx, dy = 0, 0
-        if keys_pressed[pygame.K_LEFT]:  dx -= 1
-        if keys_pressed[pygame.K_RIGHT]: dx += 1
-        if keys_pressed[pygame.K_UP]:    dy -= 1
-        if keys_pressed[pygame.K_DOWN]:  dy += 1
+        if keys_pressed[pygame.K_LEFT]:
+            dx -= 1
+        if keys_pressed[pygame.K_RIGHT]:
+            dx += 1
+        if keys_pressed[pygame.K_UP]:
+            dy -= 1
+        if keys_pressed[pygame.K_DOWN]:
+            dy += 1
         norm = math.hypot(dx, dy)
         if norm != 0:
-            self.dir[0] = dx / norm
-            self.dir[1] = dy / norm
-        else:
-            self.dir = [0, 0]
+            dx /= norm
+            dy /= norm
+            move = self.speed_px_value() * dt
+            self.x += dx * move
+            self.y += dy * move
 
-    def auto_update(self, target: Target):
-        # Вектор від центру до цілі
-        cx, cy = WIDTH//2, HEIGHT//2
-        dx = target.x - cx
-        dy = target.y - cy
+        # Обмежуємо координати вікном
+        self.x = min(max(self.x, 0), WIDTH)
+        self.y = min(max(self.y, 0), HEIGHT)
+
+    def update_auto(self, target: Target, dt):
+        # Автоматичне наближення прицілу до цілі
+        dx = target.x - self.x
+        dy = target.y - self.y
         dist = math.hypot(dx, dy)
         if dist > 2:
-            self.dir = [dx/dist, dy/dist]
+            dx /= dist
+            dy /= dist
+            self.x += dx * self.speed_px_value() * dt
+            self.y += dy * self.speed_px_value() * dt
+
+        # Автоматична зміна швидкості для швидшого суміщення
+        if dist > 280:
+            self.speed_kmh = DRONE_MAX_SPEED_KMH
+        elif dist < 110:
+            self.speed_kmh = DRONE_MIN_SPEED_KMH
         else:
-            self.dir = [0,0]
-        # Автозміна швидкості для ефективного наближення — залишаємо можливість ручної зміни
-        # (Користувач все одно може вручну змінити кілометраж!)
+            scale = (dist - 110) / (280-110)
+            self.speed_kmh = int(DRONE_MIN_SPEED_KMH + (DRONE_MAX_SPEED_KMH - DRONE_MIN_SPEED_KMH) * scale)
 
-    def move_target(self, target: Target, dt):
-        # Зсуваємо ціль відносно центру на "швидкість прицілу"
-        # (Змінюємо тим самим ефективну відстань до цілі)
-        # Ціль "тікає", приціл "наздоганяє" (ефект досягається додаванням швидкості прицілу до координат цілі)
-        target.x -= self.dir[0] * self.speed_px_value() * dt * 1.3  # "дрібний бонус" до швидкості
-        target.y -= self.dir[1] * self.speed_px_value() * dt * 1.3
+        self.x = min(max(self.x, 0), WIDTH)
+        self.y = min(max(self.y, 0), HEIGHT)
 
-# Малюємо приціл — квадрат та зелена крапка у центрі екрана
-def draw_crosshair(surface):
-    cx, cy = WIDTH //2, HEIGHT //2
+    def center(self):
+        return int(self.x), int(self.y)
+
+# Малюємо приціл: червоний квадрат та зелена точка в центрі
+def draw_crosshair(surface, center):
+    x, y = center
     hs = SQUARE_SIZE // 2
     # Червоний квадрат
-    pygame.draw.rect(surface, SQUARE_COLOR, (cx - hs, cy - hs, SQUARE_SIZE, SQUARE_SIZE), 2)
+    pygame.draw.rect(surface, SQUARE_COLOR,
+                     (x - hs, y - hs, SQUARE_SIZE, SQUARE_SIZE),
+                     2)
     # Зелена крапка
-    pygame.draw.circle(surface, CROSSHAIR_COLOR, (cx, cy), CROSSHAIR_RADIUS)
+    pygame.draw.circle(surface, CROSSHAIR_COLOR, (x, y), CROSSHAIR_RADIUS)
 
 # Функція для тексту на екрані
 def draw_text(surface, text, pos, color=(0,0,0)):
@@ -198,76 +191,82 @@ def main():
     pygame.display.set_caption("Drone Targeting Simulator")
     clock = pygame.time.Clock()
 
-    drone = Drone()
-    target = Target()
-    stage = "normal" # 'normal', 'locked', 'destroyed'
+    center = (WIDTH//2, HEIGHT//2)
+    drone = Drone(*center)
+    target = Target(WIDTH//2, HEIGHT//2)
+    auto_mode = False
+    stage = "normal"  # Також можливі 'locked' або 'destroyed'
     show_target_txt = False
 
-    running = True
-    while running:
+    run = True
+    while run:
         dt = clock.tick(FPS)/1000
-        keys = pygame.key.get_pressed()
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False
-            if stage == "destroyed":
+                run = False
+            if stage == 'destroyed':
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
-                    running = False
+                    run = False
             elif event.type == pygame.KEYDOWN:
-                # Зміна швидкості дрона завжди дозволена!
-                if event.key == pygame.K_q:
-                    drone.speed_kmh = min(drone.speed_kmh+DRONE_SPEED_STEP, DRONE_MAX_SPEED_KMH)
-                if event.key == pygame.K_a:
-                    drone.speed_kmh = max(drone.speed_kmh-DRONE_SPEED_STEP, DRONE_MIN_SPEED_KMH)
+                if not auto_mode:
+                    # Зміна швидкості дрона клавішами 'q'/'a'
+                    if event.key == pygame.K_q:
+                        drone.speed_kmh = min(drone.speed_kmh+DRONE_SPEED_STEP, DRONE_MAX_SPEED_KMH)
+                    if event.key == pygame.K_a:
+                        drone.speed_kmh = max(drone.speed_kmh-DRONE_SPEED_STEP, DRONE_MIN_SPEED_KMH)
                 if event.key == pygame.K_SPACE:
                     # Вмикаємо/вимикаємо автосупровід, якщо ціль захоплена
                     if show_target_txt and stage != 'destroyed':
-                        drone.auto_mode = not drone.auto_mode
-                        if drone.auto_mode:
+                        auto_mode = not auto_mode
+                        if auto_mode:
                             stage = 'locked'
                         else:
                             stage = 'normal'
 
         if stage == "destroyed":
-            # Все фіксуємо, очікуємо ENTER
+            # Фіксуємо все, очікуємо ENTER
             pass
         else:
-            if not drone.auto_mode:
-                drone.manual_update(keys)
+            cross_x, cross_y = drone.center()
+            if not auto_mode:
+                keys = pygame.key.get_pressed()
+                drone.update_manual(keys, dt)
             else:
-                drone.auto_update(target)
+                drone.update_auto(target, dt)
 
-            # Приціл завжди у центрі. Зсуваємо ціль відносно центру на швидкість прицілу.
-            drone.move_target(target, dt)
-            # Оновлюємо рух самої цілі (хаотична втеча)
-            target.update(dt, drone.speed_px_value(), drone.dir)
+            target.update(dt, cross_x, cross_y)
 
-            # Перевіряємо стан захвату
-            inside = target.is_inside_square()
-            big = target.covers_half_square()
-            show_target_txt = inside and big
+            # Перевіряємо: чи ціль у прицілі і вона достатньо велика (займає півквадрата)
+            inside = target.is_inside_square(cross_x, cross_y, SQUARE_SIZE)
+            big = target.covers_half_square(SQUARE_SIZE)
+            if inside and big and not stage == 'locked' and not auto_mode:
+                show_target_txt = True
+            elif inside and big and auto_mode:
+                show_target_txt = True
+                # У режимі авто швидкість змінюється
+            else:
+                show_target_txt = False
 
+            # Якщо ціль займала екран — перемагаємо
             if target.covers_whole_screen():
                 stage = "destroyed"
-                drone.dir = [0,0]
-                drone.auto_mode = False
+                auto_mode = False
 
         # --- МАЛЮВАННЯ ---
         screen.fill(SKY_COLOR)
         target.draw(screen)
-        draw_crosshair(screen)
+        draw_crosshair(screen, drone.center())
 
         # Написи
         if stage == "destroyed":
             draw_text(screen, "Target Destroy", (WIDTH//2, HEIGHT//2-40), (255,30,30))
             draw_text(screen, "Enter to exit", (WIDTH//2, HEIGHT//2+20), (0,0,0))
         elif show_target_txt:
-            if not drone.auto_mode:
+            if not auto_mode:
                 draw_text(screen, "Target", (WIDTH//2, HEIGHT//2 + SQUARE_SIZE//2 + 25), (30,90,30))
             else:
                 draw_text(screen, "Target Locked", (WIDTH//2, HEIGHT//2 + SQUARE_SIZE//2 + 25), (10,30,150))
-
         # Виводимо швидкість дрона і цілі
         font = pygame.font.SysFont("Arial", 22)
         s1 = font.render(f"Drone speed: {drone.speed_kmh:.0f} км/год", True, (40, 10, 10))
@@ -277,8 +276,8 @@ def main():
 
         pygame.display.flip()
 
-pygame.quit()
-sys.exit()
+    pygame.quit()
+    sys.exit()
 
 if __name__ == "__main__":
     main()
