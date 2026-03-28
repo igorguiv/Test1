@@ -1,7 +1,3 @@
-# Щоб запустити цей файл через термінал, використайте команду:
-#    python3 Назва_файлу.py
-# Перевірте, що встановлено pygame: pip install pygame
-
 import os
 os.environ['PYGAME_DETECT_AVX2'] = '1'
 import pygame
